@@ -19,6 +19,7 @@ function getYesterdayDate(): string {
 const STUDY_DATES_KEY = "flashcard_study_dates"
 const STUDY_MINUTES_PREFIX = "flashcard_study_minutes_"
 const MASTERED_CARDS_KEY = "flashcard_mastered_cards"
+const UNMASTERED_CARDS_KEY = "flashcard_unmastered_cards"
 
 export function getDailyStudyMinutes(): number {
   const today = getTodayDate()
@@ -90,6 +91,36 @@ export function removeMasteredCard(cardId: string): void {
   const ids: string[] = raw ? JSON.parse(raw) : []
   const filtered = ids.filter((id) => id !== cardId)
   localStorage.setItem(MASTERED_CARDS_KEY, JSON.stringify(filtered))
+}
+
+export function getMasteredCardIds(): string[] {
+  const raw = localStorage.getItem(MASTERED_CARDS_KEY)
+  return raw ? JSON.parse(raw) : []
+}
+
+export function getUnmasteredCardIds(): string[] {
+  const raw = localStorage.getItem(UNMASTERED_CARDS_KEY)
+  return raw ? JSON.parse(raw) : []
+}
+
+export function addUnmasteredCard(cardId: string): void {
+  const raw = localStorage.getItem(UNMASTERED_CARDS_KEY)
+  const ids: string[] = raw ? JSON.parse(raw) : []
+  if (!ids.includes(cardId)) {
+    ids.push(cardId)
+    localStorage.setItem(UNMASTERED_CARDS_KEY, JSON.stringify(ids))
+  }
+}
+
+export function removeUnmasteredCard(cardId: string): void {
+  const raw = localStorage.getItem(UNMASTERED_CARDS_KEY)
+  const ids: string[] = raw ? JSON.parse(raw) : []
+  const filtered = ids.filter((id) => id !== cardId)
+  localStorage.setItem(UNMASTERED_CARDS_KEY, JSON.stringify(filtered))
+}
+
+export function clearUnmasteredCards(): void {
+  localStorage.removeItem(UNMASTERED_CARDS_KEY)
 }
 
 function cleanupOldStudyData(): void {
