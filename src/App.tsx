@@ -10,6 +10,7 @@ import ProfilePage from "./pages/ProfilePage"
 import LoginPage from "./pages/LoginPage"
 import SpellingTest from "./pages/SpellingTest"
 import EditSet from "./pages/EditSet"
+import RandomCardViewer from "./pages/RandomCardViewer"
 import AuthBridge from "./components/AuthBridge"
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/set/:id/match" element={<MatchGame />} />
             <Route path="/set/:id/spell" element={<SpellingTest />} />
             <Route path="/set/:id/edit" element={<EditSet />} />
+            <Route path="/set/:id/random" element={<RandomCardViewer />} />
             <Route path="/create" element={<CreateSet />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/login" element={<LoginPage />} />
