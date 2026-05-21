@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock,
   User,
+  Shuffle,
 } from "lucide-react"
 import { useStore } from "../store/useStore"
 
@@ -98,6 +99,13 @@ export default function StudySetPage() {
               >
                 <RotateCcw className="w-5 h-5" />
                 闪卡学习
+              </Link>
+              <Link
+                to={`/set/${studySet.id}/random`}
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-orange-500 hover:from-purple-600 hover:to-orange-600 text-white font-medium px-6 py-3 rounded-xl transition-all duration-200 shadow-lg shadow-purple-500/20"
+              >
+                <Shuffle className="w-5 h-5" />
+                随机单词卡
               </Link>
               <Link
                 to={`/set/${studySet.id}/match`}
