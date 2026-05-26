@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from "react"
+import type { ReactNode } from "react"
+import { apiCall, saveToken, loadToken, clearToken } from "../lib/api"
 
 export interface AuthUser {
   username: string
@@ -19,46 +21,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
-const TOKEN_KEY = "flashmind_token"
-const PERSIST_KEY = "flashmind_persist"
 const API_BASE = "/api/auth"
 
-function saveToken(token: string, remember: boolean) {
-  if (remember) {
-    localStorage.setItem(TOKEN_KEY, token)
-  }
-  sessionStorage.setItem(TOKEN_KEY, token)
-  if (remember) {
-    localStorage.setItem(PERSIST_KEY, "1")
-  } else {
-    localStorage.removeItem(PERSIST_KEY)
-  }
-}
-
-function loadToken(): string | null {
-  return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || null
-}
-
-function clearToken() {
-  sessionStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(PERSIST_KEY)
-}
-
-async function apiCall<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = loadToken()
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  }
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`
-  }
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
-  return res.json()
-}
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -69,7 +34,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
-    apiCall<{ success: boolean; user?: AuthUser; error?: string }>("/me")
+    apiCall<{ success: boolean; user?: AuthUser; error?: string }>(`${API_BASE}/me`)
       .then((data) => {
         if (data.success && data.user) {
           setUser(data.user)
@@ -86,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (username: string, password: string, remember: boolean) => {
     try {
       const data = await apiCall<{ success: boolean; user?: AuthUser; token?: string; error?: string }>(
-        "/login",
+        `${API_BASE}/login`,
         {
           method: "POST",
           body: JSON.stringify({ username, password }),
@@ -106,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(async (username: string, email: string, password: string, code: string) => {
     try {
       const data = await apiCall<{ success: boolean; user?: AuthUser; token?: string; error?: string }>(
-        "/register",
+        `${API_BASE}/register`,
         {
           method: "POST",
           body: JSON.stringify({ username, email, password, code }),
@@ -131,7 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         message?: string
         devMode?: boolean
         retryAfter?: number
-      }>("/send-verification", {
+      }>(`${API_BASE}/send-verification`, {
         method: "POST",
         body: JSON.stringify({ email }),
       })
@@ -144,10 +109,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     const token = loadToken()
     if (token) {
-      navigator.sendBeacon(`${API_BASE}/logout`, JSON.stringify({}))
+      try {
+        await apiCall(`${API_BASE}/logout`, {
+          method: "POST",
+        })
+      } catch {
+        // ignore
+      }
     }
     setUser(null)
     clearToken()
@@ -155,14 +126,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const resetPassword = useCallback(async (email: string) => {
     try {
-      const data = await apiCall<{ success: boolean; error?: string }>(
-        "/reset-password",
+      const data = await apiCall<{ success: boolean; error?: string; message?: string }>(
+        `${API_BASE}/reset-password`,
         {
           method: "POST",
           body: JSON.stringify({ email }),
         }
       )
-      if (data.success) return { success: true }
+      if (data.success) return { success: true, message: data.message }
       return { success: false, error: data.error || "发送失败" }
     } catch {
       return { success: false, error: "网络错误，请检查网络连接" }

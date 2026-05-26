@@ -121,7 +121,7 @@ export default function ProfilePage() {
             <h2 className="text-lg font-semibold text-surface-800 dark:text-surface-200">最近学习</h2>
           </div>
           <div className="space-y-3">
-            {mySets.slice(0, 4).map((set, i) => (
+            {mySets.slice(0, 4).map((set) => (
               <Link
                 key={set.id}
                 to={`/set/${set.id}`}

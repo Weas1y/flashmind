@@ -15,10 +15,18 @@ const SESSIONS_FILE = join(DATA_DIR, "sessions.json")
 const VERIFY_FILE = join(DATA_DIR, "verifications.json")
 const EMAIL_LOG_FILE = join(DATA_DIR, "email.log")
 const RATE_LIMIT_FILE = join(DATA_DIR, "rate_limits.json")
+const LOGIN_RATE_LIMIT_FILE = join(DATA_DIR, "login_rate_limits.json")
 const STUDY_SETS_FILE = join(DATA_DIR, "studysets.json")
+const RESET_TOKENS_FILE = join(DATA_DIR, "reset_tokens.json")
 
 const VERIFY_CODE_TTL = 10 * 60 * 1000
+const SESSION_TTL = 7 * 24 * 60 * 60 * 1000
 const RATE_LIMIT_WINDOW = 60 * 1000
+const LOGIN_RATE_LIMIT_WINDOW = 15 * 60 * 1000
+const LOGIN_MAX_ATTEMPTS = 5
+const RESET_TOKEN_TTL = 30 * 60 * 1000
+
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "").split(",").filter(Boolean)
 
 const SMTP_CONFIG = {
   host: process.env.SMTP_HOST || "",
@@ -90,6 +98,42 @@ function checkRateLimit(email) {
   return { blocked: false, remaining: 0 }
 }
 
+function checkLoginRateLimit(ip) {
+  const limits = readJSON(LOGIN_RATE_LIMIT_FILE, {})
+  const entry = limits[ip] || { attempts: 0, firstAttempt: Date.now() }
+
+  if (Date.now() - entry.firstAttempt > LOGIN_RATE_LIMIT_WINDOW) {
+    entry.attempts = 0
+    entry.firstAttempt = Date.now()
+  }
+
+  if (entry.attempts >= LOGIN_MAX_ATTEMPTS) {
+    const remaining = Math.ceil((LOGIN_RATE_LIMIT_WINDOW - (Date.now() - entry.firstAttempt)) / 60000)
+    return { blocked: true, remaining }
+  }
+
+  return { blocked: false, attempts: entry.attempts }
+}
+
+function recordLoginAttempt(ip, success) {
+  const limits = readJSON(LOGIN_RATE_LIMIT_FILE, {})
+  const entry = limits[ip] || { attempts: 0, firstAttempt: Date.now() }
+
+  if (success) {
+    delete limits[ip]
+  } else {
+    if (Date.now() - entry.firstAttempt > LOGIN_RATE_LIMIT_WINDOW) {
+      entry.attempts = 1
+      entry.firstAttempt = Date.now()
+    } else {
+      entry.attempts += 1
+    }
+    limits[ip] = entry
+  }
+
+  writeJSON(LOGIN_RATE_LIMIT_FILE, limits)
+}
+
 function cleanupExpired() {
   const verifications = readJSON(VERIFY_FILE, {})
   const now = Date.now()
@@ -101,6 +145,36 @@ function cleanupExpired() {
     }
   }
   if (changed) writeJSON(VERIFY_FILE, verifications)
+
+  const sessions = readJSON(SESSIONS_FILE, {})
+  let sessionChanged = false
+  for (const token of Object.keys(sessions)) {
+    if (now - sessions[token].createdAt > SESSION_TTL) {
+      delete sessions[token]
+      sessionChanged = true
+    }
+  }
+  if (sessionChanged) writeJSON(SESSIONS_FILE, sessions)
+
+  const resetTokens = readJSON(RESET_TOKENS_FILE, {})
+  let resetChanged = false
+  for (const token of Object.keys(resetTokens)) {
+    if (now - resetTokens[token].createdAt > RESET_TOKEN_TTL) {
+      delete resetTokens[token]
+      resetChanged = true
+    }
+  }
+  if (resetChanged) writeJSON(RESET_TOKENS_FILE, resetTokens)
+
+  const loginLimits = readJSON(LOGIN_RATE_LIMIT_FILE, {})
+  let loginChanged = false
+  for (const ip of Object.keys(loginLimits)) {
+    if (now - loginLimits[ip].firstAttempt > LOGIN_RATE_LIMIT_WINDOW) {
+      delete loginLimits[ip]
+      loginChanged = true
+    }
+  }
+  if (loginChanged) writeJSON(LOGIN_RATE_LIMIT_FILE, loginLimits)
 }
 
 let transporter = null
@@ -151,8 +225,54 @@ async function sendVerificationEmail(to, code) {
   }
 }
 
+async function sendResetEmail(to, resetToken) {
+  const transport = getTransporter()
+
+  if (!transport) {
+    emailLog(`DEV MODE - Reset token for ${to}: ${resetToken}`)
+    return { success: true, devMode: true }
+  }
+
+  try {
+    const baseUrl = process.env.APP_URL || "http://localhost:5173"
+    const resetLink = `${baseUrl}/reset-password?token=${resetToken}`
+    const info = await transport.sendMail({
+      from: `"FlashMind" <${SMTP_CONFIG.auth.user}>`,
+      to,
+      subject: "密码重置 - FlashMind",
+      html: `<div style="max-width:480px;margin:0 auto;font-family:Arial,sans-serif">
+  <div style="background:linear-gradient(135deg,#4A6BFF,#FF8C42);padding:24px;border-radius:16px 16px 0 0;text-align:center">
+    <h1 style="color:#fff;margin:0;font-size:22px">FlashMind</h1>
+    <p style="color:rgba(255,255,255,0.8);margin:4px 0 0;font-size:13px">密码重置</p>
+  </div>
+  <div style="background:#fff;padding:32px 24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 16px 16px">
+    <p style="color:#374151;font-size:15px;margin:0 0 24px">你正在重置 FlashMind 账号密码，请点击以下按钮完成重置：</p>
+    <div style="text-align:center;margin-bottom:24px">
+      <a href="${resetLink}" style="display:inline-block;padding:12px 32px;background:linear-gradient(135deg,#4A6BFF,#FF8C42);color:#fff;text-decoration:none;border-radius:12px;font-size:16px;font-weight:600">重置密码</a>
+    </div>
+    <p style="color:#9ca3af;font-size:12px;margin:0">链接 ${Math.ceil(RESET_TOKEN_TTL / 60000)} 分钟内有效。如果这不是你的操作，请忽略此邮件。</p>
+  </div>
+</div>`,
+    })
+    emailLog(`Reset email sent to ${to} - MessageID: ${info.messageId}`)
+    return { success: true, devMode: false }
+  } catch (err) {
+    emailLog(`FAILED to send reset to ${to}: ${err.message}`)
+    return { success: false, error: err.message }
+  }
+}
+
+const corsOptions = {
+  origin: ALLOWED_ORIGINS.length > 0
+    ? ALLOWED_ORIGINS
+    : (origin, callback) => {
+        callback(null, true)
+      },
+  credentials: true,
+}
+
 const app = express()
-app.use(cors())
+app.use(cors(corsOptions))
 app.use(express.json())
 
 setInterval(cleanupExpired, 5 * 60 * 1000)
@@ -213,6 +333,9 @@ app.post("/api/auth/register", async (req, res) => {
   if (!username || !email || !password || !code) {
     return res.status(400).json({ success: false, error: "请填写所有字段" })
   }
+  if (username.length < 2 || username.length > 20) {
+    return res.status(400).json({ success: false, error: "用户名长度需在2-20个字符之间" })
+  }
   if (password.length < 6) {
     return res.status(400).json({ success: false, error: "密码至少需要6个字符" })
   }
@@ -247,7 +370,7 @@ app.post("/api/auth/register", async (req, res) => {
   }
 
   const newUser = {
-    id: email,
+    id: crypto.randomUUID(),
     username,
     email,
     passwordHash: await hashPassword(password),
@@ -260,14 +383,14 @@ app.post("/api/auth/register", async (req, res) => {
 
   const token = generateToken()
   const sessions = readJSON(SESSIONS_FILE, {})
-  sessions[token] = { id: email, username, email, createdAt: Date.now() }
+  sessions[token] = { id: newUser.id, username, email, createdAt: Date.now() }
   writeJSON(SESSIONS_FILE, sessions)
 
   emailLog(`User registered: ${username} (${email})`)
 
   res.json({
     success: true,
-    user: { id: email, username, email },
+    user: { id: newUser.id, username, email },
     token,
   })
 })
@@ -279,6 +402,15 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(400).json({ success: false, error: "请输入用户名和密码" })
   }
 
+  const clientIp = req.ip || req.connection.remoteAddress || "unknown"
+  const loginLimit = checkLoginRateLimit(clientIp)
+  if (loginLimit.blocked) {
+    return res.status(429).json({
+      success: false,
+      error: `登录尝试过多，请 ${loginLimit.remaining} 分钟后再试`,
+    })
+  }
+
   const users = readJSON(USERS_FILE, [])
   const inputLower = username.toLowerCase()
   const found = users.find(
@@ -286,20 +418,24 @@ app.post("/api/auth/login", async (req, res) => {
   )
 
   if (!found) {
+    recordLoginAttempt(clientIp, false)
     return res.status(401).json({ success: false, error: "账号不存在，请检查输入或先注册" })
   }
   if (!(await verifyPassword(password, found.passwordHash))) {
+    recordLoginAttempt(clientIp, false)
     return res.status(401).json({ success: false, error: "密码错误，请重试" })
   }
 
+  recordLoginAttempt(clientIp, true)
+
   const token = generateToken()
   const sessions = readJSON(SESSIONS_FILE, {})
-  sessions[token] = { id: found.email, username: found.username, email: found.email, createdAt: Date.now() }
+  sessions[token] = { id: found.id, username: found.username, email: found.email, createdAt: Date.now() }
   writeJSON(SESSIONS_FILE, sessions)
 
   res.json({
     success: true,
-    user: { id: found.email, username: found.username, email: found.email },
+    user: { id: found.id, username: found.username, email: found.email },
     token,
   })
 })
@@ -313,6 +449,11 @@ app.get("/api/auth/me", (req, res) => {
   const sessions = readJSON(SESSIONS_FILE, {})
   const session = sessions[token]
   if (!session) {
+    return res.status(401).json({ success: false, error: "登录已过期" })
+  }
+  if (Date.now() - session.createdAt > SESSION_TTL) {
+    delete sessions[token]
+    writeJSON(SESSIONS_FILE, sessions)
     return res.status(401).json({ success: false, error: "登录已过期" })
   }
 
@@ -329,7 +470,7 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ success: true })
 })
 
-app.post("/api/auth/reset-password", (req, res) => {
+app.post("/api/auth/reset-password", async (req, res) => {
   const { email } = req.body
   if (!email) {
     return res.status(400).json({ success: false, error: "请输入邮箱" })
@@ -341,10 +482,76 @@ app.post("/api/auth/reset-password", (req, res) => {
     return res.status(404).json({ success: false, error: "该邮箱未注册" })
   }
 
-  res.json({ success: true })
+  const resetToken = generateToken()
+  const resetTokens = readJSON(RESET_TOKENS_FILE, {})
+  resetTokens[resetToken] = {
+    userId: found.id,
+    email: found.email,
+    createdAt: Date.now(),
+  }
+  writeJSON(RESET_TOKENS_FILE, resetTokens)
+
+  const result = await sendResetEmail(found.email, resetToken)
+
+  if (result.success) {
+    res.json({
+      success: true,
+      message: result.devMode
+        ? "重置链接已生成（开发模式，请查看服务器日志）"
+        : "重置链接已发送到你的邮箱",
+    })
+  } else {
+    delete resetTokens[resetToken]
+    writeJSON(RESET_TOKENS_FILE, resetTokens)
+    res.status(500).json({ success: false, error: "邮件发送失败，请稍后重试" })
+  }
 })
 
-// ========== 学习集 API ==========
+app.post("/api/auth/confirm-reset", async (req, res) => {
+  const { token, newPassword } = req.body
+  if (!token || !newPassword) {
+    return res.status(400).json({ success: false, error: "参数不完整" })
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ success: false, error: "密码至少需要6个字符" })
+  }
+
+  const resetTokens = readJSON(RESET_TOKENS_FILE, {})
+  const resetEntry = resetTokens[token]
+
+  if (!resetEntry) {
+    return res.status(400).json({ success: false, error: "重置链接无效或已使用" })
+  }
+  if (Date.now() - resetEntry.createdAt > RESET_TOKEN_TTL) {
+    delete resetTokens[token]
+    writeJSON(RESET_TOKENS_FILE, resetTokens)
+    return res.status(400).json({ success: false, error: "重置链接已过期" })
+  }
+
+  const users = readJSON(USERS_FILE, [])
+  const userIndex = users.findIndex((u) => u.id === resetEntry.userId)
+  if (userIndex === -1) {
+    return res.status(404).json({ success: false, error: "用户不存在" })
+  }
+
+  users[userIndex].passwordHash = await hashPassword(newPassword)
+  writeJSON(USERS_FILE, users)
+
+  delete resetTokens[token]
+  writeJSON(RESET_TOKENS_FILE, resetTokens)
+
+  const sessions = readJSON(SESSIONS_FILE, {})
+  for (const sessToken of Object.keys(sessions)) {
+    if (sessions[sessToken].id === resetEntry.userId) {
+      delete sessions[sessToken]
+    }
+  }
+  writeJSON(SESSIONS_FILE, sessions)
+
+  emailLog(`Password reset for user: ${resetEntry.email}`)
+
+  res.json({ success: true, message: "密码重置成功" })
+})
 
 function requireAuth(req, res, next) {
   const token = getToken(req)
@@ -352,6 +559,11 @@ function requireAuth(req, res, next) {
   const sessions = readJSON(SESSIONS_FILE, {})
   const session = sessions[token]
   if (!session) return res.status(401).json({ success: false, error: "登录已过期" })
+  if (Date.now() - session.createdAt > SESSION_TTL) {
+    delete sessions[token]
+    writeJSON(SESSIONS_FILE, sessions)
+    return res.status(401).json({ success: false, error: "登录已过期" })
+  }
   req.user = session
   next()
 }

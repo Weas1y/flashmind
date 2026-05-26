@@ -44,7 +44,7 @@ export function loadShortcuts(): ShortcutMap {
     const merged: ShortcutMap = { ...DEFAULT_SHORTCUTS }
     for (const key of Object.keys(merged)) {
       if (key in parsed) {
-        merged[key] = parsed[key]
+        merged[key] = parsed[key] ?? null
       }
     }
     return merged

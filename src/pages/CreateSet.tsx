@@ -11,7 +11,7 @@ interface CardForm {
 
 export default function CreateSet() {
   const navigate = useNavigate()
-  const { addStudySet, studySets, categories } = useStore()
+  const { addStudySet, categories } = useStore()
   const { user, isAuthenticated } = useAuth()
 
   const [title, setTitle] = useState("")

@@ -1,25 +1,11 @@
 import { create } from "zustand"
 import type { StudySet } from "../data/mockData"
 import { defaultCategoryList } from "../data/mockData"
+import { apiCall } from "../lib/api"
 
 interface DeletedStudySet {
   set: StudySet
   deletedAt: number
-}
-
-function getToken(): string | null {
-  return sessionStorage.getItem("flashmind_token") || localStorage.getItem("flashmind_token") || null
-}
-
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken()
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  }
-  if (token) headers["Authorization"] = `Bearer ${token}`
-  const res = await fetch(`/api${path}`, { ...options, headers })
-  return res.json()
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null
@@ -28,17 +14,17 @@ function scheduleSync(studySets: StudySet[]) {
   if (syncTimer) clearTimeout(syncTimer)
   syncTimer = setTimeout(async () => {
     try {
-      await apiFetch("/studysets", {
+      await apiCall("/studysets", {
         method: "PUT",
         body: JSON.stringify({ studySets }),
       })
-    } catch { /* 静默失败，数据保留在本地状态 */ }
+    } catch { /* silent */ }
   }, 300)
 }
 
 async function fetchStudySets(): Promise<StudySet[]> {
   try {
-    const data = await apiFetch<{ success: boolean; studySets: StudySet[] }>("/studysets")
+    const data = await apiCall<{ success: boolean; studySets: StudySet[] }>("/studysets")
     return data.success ? data.studySets : []
   } catch {
     return []

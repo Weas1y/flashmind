@@ -5,7 +5,6 @@ import {
   RefreshCw,
   Check,
   X,
-  ChevronRight,
   ChevronLeft,
   ArrowRight,
   RotateCcw,
@@ -24,10 +23,8 @@ import {
   ListOrdered,
   TrendingUp,
   SkipForward,
-  X as CloseIcon,
   Hash,
   Gauge,
-  Zap,
   Eye,
   Edit3,
 } from "lucide-react"

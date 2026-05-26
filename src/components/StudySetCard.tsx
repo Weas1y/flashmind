@@ -9,7 +9,7 @@ interface StudySetCardProps {
   onConfirmDelete?: (id: string) => void
 }
 
-export default function StudySetCard({ set, onDelete, onConfirmDelete }: StudySetCardProps) {
+export default function StudySetCard({ set, onConfirmDelete }: StudySetCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -127,7 +127,7 @@ export default function StudySetCard({ set, onDelete, onConfirmDelete }: StudySe
   )
 }
 
-export function FeaturedSetCard({ set, onDelete, onConfirmDelete }: StudySetCardProps) {
+export function FeaturedSetCard({ set, onConfirmDelete }: StudySetCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
 

@@ -2,14 +2,22 @@ import { Client } from "ssh2"
 import { readFileSync, readdirSync, statSync, existsSync } from "fs"
 import { join, relative, normalize, sep } from "path"
 
-const HOST = "192.168.31.44"
-const PORT = 22
-const USERNAME = "root"
-const PASSWORD = "Wxr.2003"
-const REMOTE_APP_DIR = "/var/www/html/flashcard"
-const REMOTE_API_DIR = "/opt/flashcard-api"
+const HOST = process.env.DEPLOY_HOST || ""
+const PORT = parseInt(process.env.DEPLOY_PORT || "22")
+const USERNAME = process.env.DEPLOY_USER || ""
+const PASSWORD = process.env.DEPLOY_PASS || ""
+const PRIVATE_KEY = process.env.DEPLOY_KEY_PATH || ""
+const REMOTE_APP_DIR = process.env.DEPLOY_REMOTE_APP || "/var/www/html/flashcard"
+const REMOTE_API_DIR = process.env.DEPLOY_REMOTE_API || "/opt/flashcard-api"
 const LOCAL_DIST = "./dist"
 const LOCAL_SERVER = "./server"
+
+if (!HOST || !USERNAME) {
+  console.error("错误：请设置 DEPLOY_HOST 和 DEPLOY_USER 环境变量")
+  console.error("可选：DEPLOY_PASS (密码) 或 DEPLOY_KEY_PATH (SSH密钥路径)")
+  console.error("示例：DEPLOY_HOST=1.2.3.4 DEPLOY_USER=root DEPLOY_PASS=xxx node deploy.mjs")
+  process.exit(1)
+}
 
 const conn = new Client()
 
@@ -133,9 +141,7 @@ Environment=PORT=3001
 [Install]
 WantedBy=multi-user.target`
 
-    await exec(`cat > /etc/systemd/system/flashcard-api.service << 'SYSTEMDEOF'
-${serviceFile}
-SYSTEMDEOF`)
+    await exec(`cat > /etc/systemd/system/flashcard-api.service << 'SYSTEMDEOF'\n${serviceFile}\nSYSTEMDEOF`)
 
     await exec("systemctl daemon-reload")
     await exec("systemctl enable flashcard-api")
@@ -175,9 +181,7 @@ SYSTEMDEOF`)
     }
 }`
 
-    await exec(`cat > /etc/nginx/sites-available/flashcard << 'NGINXEOF'
-${nginxConfig}
-NGINXEOF`)
+    await exec(`cat > /etc/nginx/sites-available/flashcard << 'NGINXEOF'\n${nginxConfig}\nNGINXEOF`)
 
     const nginxTest = await exec("nginx -t 2>&1")
     if (nginxTest.includes("successful")) {
@@ -189,7 +193,6 @@ NGINXEOF`)
 
     const apiStatus = await exec("systemctl is-active flashcard-api 2>&1")
     console.log(`\n部署完成！API 服务状态: ${apiStatus}`)
-    console.log("可通过 http://192.168.31.44 访问")
   } catch (err) {
     console.error("部署失败:", err.message)
   } finally {
@@ -201,10 +204,20 @@ conn.on("error", (err) => {
   console.error("SSH 连接失败:", err.message)
 })
 
-conn.connect({
+const connectOpts = {
   host: HOST,
   port: PORT,
   username: USERNAME,
-  password: PASSWORD,
   readyTimeout: 15000,
-})
+}
+
+if (PRIVATE_KEY && existsSync(PRIVATE_KEY)) {
+  connectOpts.privateKey = readFileSync(PRIVATE_KEY)
+} else if (PASSWORD) {
+  connectOpts.password = PASSWORD
+} else {
+  console.error("错误：请提供 DEPLOY_PASS 或 DEPLOY_KEY_PATH")
+  process.exit(1)
+}
+
+conn.connect(connectOpts)
